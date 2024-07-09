@@ -7,7 +7,6 @@ import tarfile
 import pathlib
 import typer
 import shutil
-from typing import List
 from . import parse_probe_log
 from . import analysis
 from . import util
@@ -146,7 +145,8 @@ def ssh(
 
     # Create a temporary directory on the local machine
     local_temp_dir = pathlib.Path(tempfile.mkdtemp(prefix=f"probe_log_{os.getpid()}"))
-    Check if remote platform matches local platform
+
+    # Check if remote platform matches local platform
     remote_gcc_machine_cmd = ["ssh"] + ssh_args + ["gcc", "-dumpmachine"]
     local_gcc_machine_cmd = ["gcc", "-dumpmachine"]
 
