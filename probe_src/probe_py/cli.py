@@ -129,14 +129,29 @@ def ssh(
     Wrap SSH and record provenance of the remote command.
     """
 
-    if "-i" not in ssh_args:
-        typer.secho("RSA key not defined", fg=typer.colors.RED)
+    ssh_cmd = ['ssh']
+
+    if "-i" in ssh_args:
+        rsa_index = ssh_args.index("-i") + 1
+        rsa = ssh_args[rsa_index]
+        ssh_cmd = ssh_cmd[:1] + ['-i',rsa] + ssh_cmd[1:]
+
+    if "-p" in ssh_args:
+        port_index = ssh_args.index("-p") + 1
+        port = ["-p",ssh_args[port_index]]
+        ssh_cmd.extend(port)
+    else:
+        ssh_cmd.extend(["-p",2222])
+
+    if "-h" not in ssh_args:
+        typer.secho("Remote host not defined", fg=typer.colors.RED)
         raise typer.Abort()
 
-    rsa_index = ssh_args.index("-i")
-    rsa = ssh_args[rsa_index + 1]
+    host_index = ssh_args.index("-h") + 1
+    remote_host = [ssh_args[host_index]] 
+    ssh_cmd.extend(remote_host)
 
-    # Determine the correct library to use
+    ssh_cmd_args = ssh_args[host_index + 1:]
 
     libprobe = project_root / "libprobe/build" / ("libprobe-dbg.so" if debug else "libprobe.so")
     if not libprobe.exists():
@@ -147,42 +162,45 @@ def ssh(
     local_temp_dir = pathlib.Path(tempfile.mkdtemp(prefix=f"probe_log_{os.getpid()}"))
 
     # Check if remote platform matches local platform
-    remote_gcc_machine_cmd = ["ssh"] + ssh_args + ["gcc", "-dumpmachine"]
-    local_gcc_machine_cmd = ["gcc", "-dumpmachine"]
-
-    remote_gcc_machine = subprocess.check_output(remote_gcc_machine_cmd).decode().strip()
-    local_gcc_machine = subprocess.check_output(local_gcc_machine_cmd).decode().strip()
-
-    if remote_gcc_machine != local_gcc_machine:
-        raise NotImplementedError("Remote platform is different from local platform")
-
-    if "-u" not in ssh_args:
-        typer.secho("Remote host not defined", fg=typer.colors.RED)
-        raise typer.Abort()
-
-    remote_index = ssh_args.index("-u")
-    remote_host = ssh_args[remote_index + 1]
-
-    ssh_cmd = ["ssh","-i",rsa,remote_host,"-p","2222"]
+    # remote_gcc_machine_cmd = ssh_cmd + ["gcc", "-dumpmachine"]
+    # local_gcc_machine_cmd = ["gcc", "-dumpmachine"]
+    #
+    # remote_gcc_machine = subprocess.check_output(remote_gcc_machine_cmd).decode().strip()
+    # local_gcc_machine = subprocess.check_output(local_gcc_machine_cmd).decode().strip()
+    #
+    # if remote_gcc_machine != local_gcc_machine:
+    #     raise NotImplementedError("Remote platform is different from local platform")
 
     # Upload libprobe.so to the remote temporary directory
     remote_temp_dir_cmd = ssh_cmd + ["mktemp", "-d", "/tmp/probe_log_XXXXXX"]
     remote_temp_dir = subprocess.check_output(remote_temp_dir_cmd).decode().strip()
     remote_probe_dir = f"{remote_temp_dir}/probe_dir"
 
-    scp_cmd = ["scp","-i",rsa, "-P", "2222", str(libprobe), f"{remote_host}:{remote_temp_dir}/"]
-    subprocess.run(scp_cmd, check=True)
+    ssh_g = subprocess.run(ssh_cmd + ['-G'],stdout=subprocess.PIPE)
+    ssh_g_op = ssh_g.stdout.decode().strip().splitlines()
+
+    ssh_pair = []
+    for pair in ssh_g_op:
+        ssh_pair.append(pair.split())
+
+    scp_args = []
+    for pair in ssh_pair:
+        scp_args.extend(['-o',f'{pair[0]}={pair[1]}'])
+
+    scp_cmd = ['scp'] + scp_args + [str(libprobe),f"{remote_host[0]}:{remote_temp_dir}/"]
+    subprocess.run(scp_cmd,check=True)
 
     # Prepare the remote command with LD_PRELOAD and __PROBE_DIR
     ld_preload = f"{remote_temp_dir}/{libprobe.name}"
+    subprocess.run(['ls','-la', ld_preload])
+
     env = f"env LD_PRELOAD={ld_preload} __PROBE_DIR={remote_probe_dir}"
 
-    if debug:
-        typer.secho(f"Running remote command: {remote_cmd}", fg=typer.colors.GREEN)
-
-    proc = subprocess.run(ssh_cmd + [env] + [ssh_args[remote_index +2]])
+    subprocess.run(env)
+    proc = subprocess.run(ssh_cmd + ssh_cmd_args)
 
     # Download the provenance log from the remote machine
+
     remote_tar_cmd = ssh_cmd + [f"tar -czf - -C {remote_temp_dir} {remote_probe_dir}"]
 
     with open(local_temp_dir / "probe_log.tar.gz", "wb") as f:
