@@ -162,14 +162,14 @@ def ssh(
     local_temp_dir = pathlib.Path(tempfile.mkdtemp(prefix=f"probe_log_{os.getpid()}"))
 
     # Check if remote platform matches local platform
-    # remote_gcc_machine_cmd = ssh_cmd + ["gcc", "-dumpmachine"]
-    # local_gcc_machine_cmd = ["gcc", "-dumpmachine"]
-    #
-    # remote_gcc_machine = subprocess.check_output(remote_gcc_machine_cmd).decode().strip()
-    # local_gcc_machine = subprocess.check_output(local_gcc_machine_cmd).decode().strip()
-    #
-    # if remote_gcc_machine != local_gcc_machine:
-    #     raise NotImplementedError("Remote platform is different from local platform")
+    remote_gcc_machine_cmd = ssh_cmd + ["gcc", "-dumpmachine"]
+    local_gcc_machine_cmd = ["gcc", "-dumpmachine"]
+
+    remote_gcc_machine = subprocess.check_output(remote_gcc_machine_cmd).decode().strip()
+    local_gcc_machine = subprocess.check_output(local_gcc_machine_cmd).decode().strip()
+
+    if remote_gcc_machine != local_gcc_machine:
+        raise NotImplementedError("Remote platform is different from local platform")
 
     # Upload libprobe.so to the remote temporary directory
     remote_temp_dir_cmd = ssh_cmd + ["mktemp", "-d", "/tmp/probe_log_XXXXXX"]
@@ -193,10 +193,8 @@ def ssh(
     # Prepare the remote command with LD_PRELOAD and __PROBE_DIR
     ld_preload = f"{remote_temp_dir}/{libprobe.name}"
 
-    env = f"env LD_PRELOAD={ld_preload} __PROBE_DIR={remote_probe_dir}"
-
-    subprocess.run(env)
-    proc = subprocess.run(ssh_cmd + ssh_cmd_args)
+    env = ["env", f"__LD_PRELOAD={ld_preload}", f"__PROBE_DIR={remote_probe_dir}"]
+    proc = subprocess.run(env + ssh_cmd + ssh_cmd_args)
 
     # Download the provenance log from the remote machine
 
